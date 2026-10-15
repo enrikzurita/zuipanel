@@ -1,0 +1,21 @@
+{
+  "name": "@zuipanel/panel",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/server.js",
+  "scripts": {
+    "build": "tsc -b",
+    "dev": "tsx watch src/server.ts",
+    "start": "node dist/server.js",
+    "migrate": "tsx src/migrate.ts",
+    "test": "tsx --test test/*.test.ts"
+  },
+  "dependencies": {
+    "@fastify/formbody": "^8.0.0",
+    "@zuipanel/shared": "0.1.0",
+    "fastify": "^5.2.0",
+    "ioredis": "^5.4.0",
+    "mysql2": "^3.12.0"
+  }
+}

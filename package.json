@@ -1,0 +1,26 @@
+{
+  "name": "zuipanel",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Panel IPTV propio compatible con la API Xtream Codes (alternativa a XUI.one)",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "npm run build -w @zuipanel/shared && npm run build -w @zuipanel/panel -w @zuipanel/agent",
+    "typecheck": "tsc -b packages/shared apps/panel apps/agent",
+    "test": "npm run build -w @zuipanel/shared && npm test -w @zuipanel/agent && npm test -w @zuipanel/panel",
+    "migrate": "npm run migrate -w @zuipanel/panel",
+    "dev:panel": "npm run dev -w @zuipanel/panel",
+    "dev:agent": "npm run dev -w @zuipanel/agent"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

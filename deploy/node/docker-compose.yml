@@ -1,0 +1,45 @@
+# Nodo de streaming: agente (FFmpeg) + nginx
+# Uso: cp node.env.example .env && editar && docker compose up -d --build
+
+services:
+  agent:
+    build:
+      context: ../..
+      target: agent
+    restart: unless-stopped
+    environment:
+      SERVER_ID: ${SERVER_ID}
+      PANEL_URL: ${PANEL_URL}
+      AGENT_KEY: ${AGENT_KEY}
+      STREAM_SECRET: ${STREAM_SECRET}
+      REDIS_URL: ${REDIS_URL}
+      X_ACCEL_PREFIX: /_vod
+      IDLE_TIMEOUT: ${IDLE_TIMEOUT:-60}
+    volumes:
+      # Segmentos HLS en RAM: más rápido y no gasta el disco
+      - type: tmpfs
+        target: /var/lib/zuipanel/hls
+        tmpfs:
+          size: 2147483648
+      # Ficheros de películas/series (tu montaje rclone, por ejemplo)
+      - ${MEDIA_DIR:-/mnt/media}:${MEDIA_DIR:-/mnt/media}:ro
+    # Descomenta para transcodificar con GPU NVIDIA (requiere nvidia-container-toolkit)
+    # environment:
+    #   NVIDIA_DRIVER_CAPABILITIES: compute,video,utility
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu, video]
+
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    depends_on: [agent]
+    ports:
+      - "${HTTP_PORT:-8081}:80"
+    volumes:
+      - ../nginx/node.conf:/etc/nginx/conf.d/default.conf:ro
+      - ${MEDIA_DIR:-/mnt/media}:${MEDIA_DIR:-/mnt/media}:ro
