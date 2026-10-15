@@ -1,6 +1,9 @@
 import { timingSafeEqual } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
-import type { AgentConfigResponse, AgentHeartbeat, TranscodeOptions } from '@zuipanel/shared';
+import type { AgentConfigResponse, AgentHeartbeat, MetricSample, TranscodeOptions } from '@zuipanel/shared';
+
+/** Muestras guardadas por nodo (una cada 15 s ≈ 90 minutos) */
+export const HISTORY_SAMPLES = 360;
 import type { AppContext } from '../context.js';
 import { execute, parseJson, query, queryOne } from '../db.js';
 
@@ -54,10 +57,32 @@ export function registerAgentRoutes(app: FastifyInstance, ctx: AppContext) {
       const serverId = (req as unknown as { serverId: number }).serverId;
       const hb = req.body as AgentHeartbeat;
       await execute(ctx.db, 'UPDATE servers SET last_heartbeat = UTC_TIMESTAMP(), status = ? WHERE id = ?', [
-        JSON.stringify({ load: hb.load, clients: hb.clients, streams: hb.streams }),
+        JSON.stringify({
+          load: hb.load,
+          clients: hb.clients,
+          streams: hb.streams,
+          cpu: hb.cpu ?? null,
+          mem: hb.mem ?? null,
+          memTotalMb: hb.memTotalMb ?? null,
+          netInMbps: hb.netInMbps ?? 0,
+          netOutMbps: hb.netOutMbps ?? 0,
+        }),
         serverId,
       ]);
-      await ctx.redis.set(`zp:srv:${serverId}:clients`, String(hb.clients ?? 0), 'EX', ctx.config.serverTimeoutSec * 2);
+      const sample: MetricSample = {
+        t: Date.now(),
+        cpu: hb.cpu ?? 0,
+        mem: hb.mem ?? 0,
+        in: hb.netInMbps ?? 0,
+        out: hb.netOutMbps ?? 0,
+        clients: hb.clients ?? 0,
+      };
+      await ctx.redis
+        .multi()
+        .set(`zp:srv:${serverId}:clients`, String(hb.clients ?? 0), 'EX', ctx.config.serverTimeoutSec * 2)
+        .lpush(`zp:srv:${serverId}:hist`, JSON.stringify(sample))
+        .ltrim(`zp:srv:${serverId}:hist`, 0, HISTORY_SAMPLES - 1)
+        .exec();
       return { ok: true };
     });
 

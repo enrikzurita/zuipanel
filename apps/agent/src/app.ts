@@ -15,6 +15,7 @@ import type { AgentConfig } from './config.js';
 import { SEGMENT_PATTERN } from './ffmpeg-args.js';
 import { parsePlaylist, rewritePlaylist } from './hls.js';
 import { Supervisor, type StreamProcess } from './supervisor.js';
+import { SystemMetrics } from './metrics.js';
 import { sendFileWithRange } from './vod.js';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -66,14 +67,21 @@ export async function buildAgent(config: AgentConfig, opts: { logger?: boolean }
     await supervisor.reconcile(cfg.streams);
   }
 
+  const metrics = new SystemMetrics();
   async function heartbeat() {
     const cutoff = Date.now() - 30_000;
     for (const [sid, t] of recentSessions) if (t < cutoff) recentSessions.delete(sid);
+    const [mem, net] = await Promise.all([metrics.memPercent(), metrics.netMbps()]);
     const hb: AgentHeartbeat = {
       serverId: config.serverId,
       clients: recentSessions.size,
       load: loadavg(),
       streams: [...supervisor.streams.values()].map((s) => s.status()),
+      cpu: metrics.cpuPercent(),
+      mem: mem.percent,
+      memTotalMb: mem.totalMb,
+      netInMbps: net.inMbps,
+      netOutMbps: net.outMbps,
     };
     await panelFetch('/internal/agent/heartbeat', { method: 'POST', body: JSON.stringify(hb) });
   }

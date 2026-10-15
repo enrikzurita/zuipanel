@@ -344,6 +344,19 @@ describe('Panel ZuiPanel (API Xtream)', { skip: !DB_URL && 'TEST_DATABASE_URL no
       });
       assert.equal(hb.statusCode, 200);
       assert.equal(await ctx.redis.get('zp:srv:1:clients'), '7');
+      const hb2 = await app.inject({
+        method: 'POST',
+        url: '/internal/agent/heartbeat',
+        headers: agent,
+        payload: { serverId: 1, clients: 3, load: [0.1], streams: [], cpu: 42.5, mem: 61, netInMbps: 80, netOutMbps: 950 },
+      });
+      assert.equal(hb2.statusCode, 200);
+      const hist = (await get('/admin/api/history', { authorization: `Bearer ${ADMIN}` })).json();
+      const last = hist[hist.length - 1];
+      assert.equal(last.cpu, 42.5);
+      assert.equal(last.out, 950);
+      const st = (await get('/admin/api/stats', { authorization: `Bearer ${ADMIN}` })).json();
+      assert.equal(st.servers.find((s: { id: number }) => s.id === 1).status.netOutMbps, 950);
       const vod = (await get('/internal/agent/vod/series/401', agent)).json();
       assert.deepEqual(vod, { path: '/media/s1e1.mp4', ext: 'mp4' });
       assert.equal((await get('/internal/agent/vod/movie/999', agent)).statusCode, 404);

@@ -59,6 +59,8 @@ export interface CrudPageProps<T extends { id: number }> {
   /** Avisa a la página de que los datos cambiaron (para refrescar contadores) */
   onChanged?: () => void;
   refreshMs?: number;
+  /** Texto de búsqueda inicial (p. ej. desde el buscador de la cabecera) */
+  initialSearch?: string;
 }
 
 const PAGE = 50;
@@ -120,8 +122,8 @@ function fromForm(fields: FieldDef[], form: Record<string, unknown>) {
 export function CrudPage<T extends { id: number }>(props: CrudPageProps<T>) {
   const { resource, columns, fields, relations = [], query = '' } = props;
   const toast = useToast();
-  const [search, setSearch] = useState('');
-  const [debounced, setDebounced] = useState('');
+  const [search, setSearch] = useState(props.initialSearch ?? '');
+  const [debounced, setDebounced] = useState(props.initialSearch ?? '');
   const [offset, setOffset] = useState(0);
   const [editing, setEditing] = useState<T | 'new' | null>(null);
 

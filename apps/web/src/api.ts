@@ -87,7 +87,16 @@ export interface Server {
   enabled: number;
   max_clients: number;
   last_heartbeat: string | null;
-  status: { load?: number[]; clients?: number; streams?: StreamStatus[] } | null;
+  status: {
+    load?: number[];
+    clients?: number;
+    streams?: StreamStatus[];
+    cpu?: number | null;
+    mem?: number | null;
+    memTotalMb?: number | null;
+    netInMbps?: number;
+    netOutMbps?: number;
+  } | null;
 }
 export interface StreamStatus {
   id: number;
@@ -163,4 +172,13 @@ export interface Stats {
   episodes: number;
   connections: number;
   servers: Array<Server & { online: boolean }>;
+}
+
+export interface MetricSample {
+  t: number;
+  cpu: number;
+  mem: number;
+  in: number;
+  out: number;
+  clients: number;
 }

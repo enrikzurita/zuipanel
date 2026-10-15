@@ -7,8 +7,11 @@ services:
       context: ../..
       target: agent
     restart: unless-stopped
+    # Para medir el tráfico de red del servidor completo, no solo del contenedor
+    pid: host
     environment:
       SERVER_ID: ${SERVER_ID}
+      NET_STATS_PATH: /proc/1/net/dev
       PANEL_URL: ${PANEL_URL}
       AGENT_KEY: ${AGENT_KEY}
       STREAM_SECRET: ${STREAM_SECRET}

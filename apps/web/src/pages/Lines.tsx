@@ -15,7 +15,7 @@ const OUTPUTS = [
   { value: 'm3u8', label: 'Solo HLS (m3u8)' },
 ];
 
-export function Lines() {
+export function Lines({ initialSearch }: { initialSearch?: string }) {
   const refs = useRefs();
   const toast = useToast();
   const { data: sessions } = useData(() => api<Session[]>('GET', '/connections'), [], 10000);
@@ -68,6 +68,7 @@ export function Lines() {
       searchPlaceholder="Buscar por usuario"
       emptyText="Crea la primera línea para dar acceso a un cliente."
       refreshMs={10000}
+      initialSearch={initialSearch}
       columns={[
         { label: 'Usuario', render: (l) => <b>{l.username}</b> },
         { label: 'Estado', render: (l) => <span className={`tally ${lineState(l).cls}`}>{lineState(l).label}</span> },

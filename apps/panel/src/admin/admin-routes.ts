@@ -1,5 +1,6 @@
 import { timingSafeEqual } from 'node:crypto';
 import type { FastifyInstance, FastifyReply } from 'fastify';
+import type { MetricSample } from '@zuipanel/shared';
 import type { AppContext } from '../context.js';
 import { execute, parseJson, query, queryOne } from '../db.js';
 
@@ -272,6 +273,48 @@ export function registerAdminRoutes(app: FastifyInstance, ctx: AppContext) {
         const { lineId, sid } = req.params as { lineId: string; sid: string };
         await ctx.tracker.kick(Number(lineId), sid);
         return { ok: true };
+      });
+
+      // ---- Histórico de métricas (CPU, memoria, red) ----
+      // ?server=ID para un nodo; sin parámetro, todos los nodos agregados
+      r.get('/history', async (req) => {
+        const q = req.query as { server?: string };
+        const ids = q.server
+          ? [Number(q.server)]
+          : (await query<{ id: number }>(ctx.db, 'SELECT id FROM servers WHERE enabled = 1')).map((s) => s.id);
+        const BUCKET = 15_000;
+        const buckets = new Map<number, { cpu: number[]; mem: number[]; in: number; out: number; clients: number }>();
+        for (const id of ids) {
+          // La lista va de más reciente a más antigua: por intervalo, nos quedamos
+          // con la muestra más reciente de cada nodo
+          const raw = await ctx.redis.lrange(`zp:srv:${id}:hist`, 0, -1);
+          const perBucket = new Map<number, MetricSample>();
+          for (const line of raw) {
+            const s = JSON.parse(line) as MetricSample;
+            const k = Math.floor(s.t / BUCKET) * BUCKET;
+            if (!perBucket.has(k)) perBucket.set(k, s);
+          }
+          for (const [k, s] of perBucket) {
+            const b = buckets.get(k) ?? { cpu: [], mem: [], in: 0, out: 0, clients: 0 };
+            b.cpu.push(s.cpu);
+            b.mem.push(s.mem);
+            b.in += s.in;
+            b.out += s.out;
+            b.clients += s.clients;
+            buckets.set(k, b);
+          }
+        }
+        const avg = (a: number[]) => Math.round((a.reduce((x, y) => x + y, 0) / a.length) * 10) / 10;
+        return [...buckets.entries()]
+          .sort((a, b) => a[0] - b[0])
+          .map(([t, b]): MetricSample => ({
+            t,
+            cpu: avg(b.cpu),
+            mem: avg(b.mem),
+            in: Math.round(b.in * 10) / 10,
+            out: Math.round(b.out * 10) / 10,
+            clients: b.clients,
+          }));
       });
 
       // ---- Resumen ----

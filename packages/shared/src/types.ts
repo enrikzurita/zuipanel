@@ -51,4 +51,22 @@ export interface AgentHeartbeat {
   clients: number;
   load: number[];
   streams: AgentStreamStatus[];
+  /** Uso de CPU del nodo en % */
+  cpu?: number;
+  /** Memoria usada en % */
+  mem?: number;
+  memTotalMb?: number;
+  /** Tráfico de red en Mbps */
+  netInMbps?: number;
+  netOutMbps?: number;
+}
+
+/** Muestra del histórico de un nodo (o de todos sumados). */
+export interface MetricSample {
+  t: number;
+  cpu: number;
+  mem: number;
+  in: number;
+  out: number;
+  clients: number;
 }

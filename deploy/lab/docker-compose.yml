@@ -76,6 +76,8 @@ services:
   agent:
     <<: *zui-common
     image: zuipanel-agent:lab
+    # Para medir el tráfico de red del servidor completo, no solo del contenedor
+    pid: host
     depends_on:
       panel: { condition: service_healthy }
       media-init: { condition: service_completed_successfully }
@@ -88,6 +90,7 @@ services:
       X_ACCEL_PREFIX: /_vod
       IDLE_TIMEOUT: 60
       SYNC_INTERVAL: 15
+      NET_STATS_PATH: /proc/1/net/dev
     volumes:
       - type: tmpfs
         target: /var/lib/zuipanel/hls
