@@ -62,18 +62,20 @@ export class ConnectionTracker {
       ACQUIRE_LUA, 1, connKey(info.lineId), sid, String(now), String(this.windowMs), String(maxConnections),
     );
     if (res !== 1) return false;
+    const fields: Record<string, string | number> = {
+      lineId: info.lineId,
+      type: info.type,
+      itemId: info.itemId,
+      ip: info.ip,
+      userAgent: info.userAgent,
+      lastSeen: now,
+    };
+    // El nodo no conoce el usuario: no pisar el que guardó el panel
+    if (info.username) fields.username = info.username;
+    if (info.serverId) fields.serverId = info.serverId;
     await this.redis
       .multi()
-      .hset(sessKey(sid), {
-        lineId: info.lineId,
-        username: info.username ?? '',
-        type: info.type,
-        itemId: info.itemId,
-        ip: info.ip,
-        userAgent: info.userAgent,
-        serverId: info.serverId ?? 0,
-        lastSeen: now,
-      })
+      .hset(sessKey(sid), fields)
       .hsetnx(sessKey(sid), 'startedAt', String(now))
       .pexpire(sessKey(sid), this.windowMs * 2)
       .zadd('zp:sessions', now, `${info.lineId}:${sid}`)

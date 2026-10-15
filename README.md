@@ -36,7 +36,7 @@ Panel IPTV propio, alternativa a XUI.one, **compatible con la API Xtream Codes**
 | Agente: remux, transcodificación CPU (x264/x265) y GPU (NVENC), bajo demanda, rotación de fuentes, reinicio automático, detección de cuelgues | ✅ |
 | VOD con soporte de Range (avanzar/retroceder), servido por nginx | ✅ |
 | API REST de administración | ✅ |
-| Interfaz web de administración | ⏳ fase 2 |
+| Panel web de gestión en `/admin/`: resumen con muro de canales, líneas, paquetes, canales, VOD, categorías, nodos, perfiles y conexiones | ✅ |
 | Importador de EPG (XMLTV) y metadatos TMDB | ⏳ fase 3 |
 | Revendedores, créditos | ⏳ fase 4 |
 | Migración desde la base de datos de XUI | ⏳ fase 5 |
@@ -80,6 +80,15 @@ ufw allow from IP_DEL_NODO to any port 6379 proto tcp
    docker compose up -d --build
    ```
 3. Para NVENC instala `nvidia-container-toolkit` y descomenta el bloque de GPU en `deploy/node/docker-compose.yml`.
+
+## Panel web de gestión
+
+Abre `http://tu-panel/admin/` y entra con el `ADMIN_TOKEN`. Desde ahí se gestiona todo lo que hace la API. En desarrollo:
+
+```bash
+npm run dev:panel              # panel en :8080
+PANEL_URL=http://127.0.0.1:8080 npm run dev:web   # web con recarga en caliente
+```
 
 ## API de administración (resumen)
 

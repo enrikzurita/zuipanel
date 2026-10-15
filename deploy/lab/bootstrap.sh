@@ -81,7 +81,8 @@ cat <<EOF
  Lista M3U:
    ${PANEL}/get.php?username=${LAB_USER}&password=${LAB_PASS}&type=m3u_plus&output=m3u8
 
- API de administración:  ${PANEL}/admin/api   (token en deploy/lab/.env → ADMIN_TOKEN)
+ Panel de gestión:  ${PANEL}/admin/
+   Token de entrada:  ${ADMIN_TOKEN}
  Logs:                    cd ${LAB_DIR} && sudo docker compose logs -f agent
 ────────────────────────────────────────────────────────────
 EOF

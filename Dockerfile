@@ -8,11 +8,12 @@ COPY package.json package-lock.json tsconfig.base.json ./
 COPY packages/shared/package.json packages/shared/
 COPY apps/panel/package.json apps/panel/
 COPY apps/agent/package.json apps/agent/
+COPY apps/web/package.json apps/web/
 RUN npm ci
 COPY packages packages
 COPY apps apps
 COPY db db
-RUN npm run build && npm prune --omit=dev
+RUN npm run build && npm run build -w @zuipanel/web && npm prune --omit=dev
 
 FROM node:22-bookworm-slim AS runtime-base
 WORKDIR /app
@@ -25,6 +26,7 @@ COPY --from=build /app/packages/shared/dist packages/shared/dist
 FROM runtime-base AS panel
 COPY --from=build /app/apps/panel/package.json apps/panel/
 COPY --from=build /app/apps/panel/dist apps/panel/dist
+COPY --from=build /app/apps/web/dist apps/web/dist
 COPY --from=build /app/db db
 ENV MIGRATIONS_DIR=/app/db/migrations PORT=8080
 EXPOSE 8080

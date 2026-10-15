@@ -9,6 +9,8 @@
   ],
   "scripts": {
     "build": "npm run build -w @zuipanel/shared && npm run build -w @zuipanel/panel -w @zuipanel/agent",
+    "build:web": "npm run build -w @zuipanel/web",
+    "dev:web": "npm run dev -w @zuipanel/web",
     "typecheck": "tsc -b packages/shared apps/panel apps/agent",
     "test": "npm run build -w @zuipanel/shared && npm test -w @zuipanel/agent && npm test -w @zuipanel/panel",
     "migrate": "npm run migrate -w @zuipanel/panel",
