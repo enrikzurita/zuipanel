@@ -37,6 +37,15 @@ export function channelState(
   }
 
   if (!anyOnline) return { tally: 'off', label: 'Sin nodo', detail: 'Ningún nodo en línea', viewers };
+  if (stream.input_type === 'push') {
+    if (!status) return { tally: 'off', label: 'Sin asignar', detail: 'Asígnalo a un nodo', viewers };
+    if (!status.signal) return { tally: 'off', label: 'Esperando señal', detail: 'Emite desde OBS o la cámara', viewers, status, serverName };
+    const rec = status.recording ? 'grabando' : '';
+    if (status.running) {
+      return { tally: 'air', label: 'En directo', detail: [status.video, rec].filter(Boolean).join(', '), viewers, status, serverName };
+    }
+    return { tally: 'wait', label: 'Arrancando', detail: rec, viewers, status, serverName };
+  }
   if (!status) {
     return { tally: 'off', label: 'Sin asignar', detail: 'No está en ningún nodo en línea', viewers };
   }

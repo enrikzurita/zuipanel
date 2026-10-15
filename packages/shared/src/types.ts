@@ -28,6 +28,11 @@ export interface AgentStreamConfig {
   onDemand: boolean;
   userAgent: string | null;
   transcode: TranscodeOptions | null;
+  /** pull = el nodo lee las fuentes; push = la cámara/OBS emite al nodo por RTMP */
+  input?: 'pull' | 'push';
+  streamKey?: string | null;
+  /** Grabar cada emisión como VOD (solo push) */
+  record?: boolean;
 }
 
 export interface AgentConfigResponse {
@@ -44,6 +49,11 @@ export interface AgentStreamStatus {
   lastError: string | null;
   video?: string;
   audio?: string;
+  input?: 'pull' | 'push';
+  /** Para canales push: hay alguien emitiendo ahora mismo */
+  signal?: boolean;
+  /** Se está grabando la emisión */
+  recording?: boolean;
 }
 
 export interface AgentHeartbeat {
@@ -69,4 +79,14 @@ export interface MetricSample {
   in: number;
   out: number;
   clients: number;
+}
+
+/** Lo que el nodo envía al panel al terminar una grabación o una subida. */
+export interface MediaFileReport {
+  path: string;
+  ext: string;
+  sizeBytes: number;
+  durationSec: number;
+  startedAt?: number;
+  endedAt?: number;
 }

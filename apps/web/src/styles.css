@@ -280,3 +280,13 @@ td.actions { text-align: right; white-space: nowrap; }
   .nav-btn { height: 48px; }
   .main { padding: 20px 14px 48px; }
 }
+
+/* Barra de progreso de subida */
+.progress { height: 10px; background: var(--panel-3); border-radius: 5px; overflow: hidden; }
+.progress > div { height: 100%; background: var(--series-1); transition: width 200ms linear; }
+
+/* Datos de conexión para OBS / cámara */
+.ingest-box { background: var(--panel-2); border: 1px solid var(--rule); border-radius: var(--radius); padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+.copy-row { display: flex; gap: 8px; align-items: center; }
+.copy-row .input { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: var(--step--1); }
+.copy-row .k { width: 110px; flex: none; color: var(--ink-2); font-size: var(--step--1); font-weight: 500; }

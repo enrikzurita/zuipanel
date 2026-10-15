@@ -13,9 +13,31 @@ async function api(method, path, body) {
   return text ? JSON.parse(text) : null;
 }
 
+/** Canal de emisión propia (OBS / cámara) con grabación; se añade también a laboratorios antiguos. */
+async function ensurePushStream() {
+  const push = await api('GET', '/streams?input_type=push');
+  if (push.total > 0) return;
+  const cats = await api('GET', '/categories?limit=1000');
+  const liveCat = cats.items.find((c) => c.type === 'live')?.id ?? null;
+  let recCat = cats.items.find((c) => c.type === 'movie' && c.name === 'Partidos grabados')?.id;
+  if (!recCat) recCat = (await api('POST', '/categories', { type: 'movie', name: 'Partidos grabados', sort: 0 })).id;
+  const s = await api('POST', '/streams', {
+    name: 'Emisión propia (OBS / cámara)', category_id: liveCat, sources: [], input_type: 'push',
+    on_demand: 0, enabled: 1, record: 1, record_category_id: recCat,
+  });
+  await api('PUT', `/streams/${s.id}/servers`, { ids: [1] });
+  const bq = await api('GET', '/bouquets?limit=1');
+  if (bq.items[0]) {
+    const items = await api('GET', `/bouquets/${bq.items[0].id}/items`);
+    await api('PUT', `/bouquets/${bq.items[0].id}/items`, { items: [...items, { type: 'live', id: s.id }] });
+  }
+  console.log('Canal de emisión propia creado.');
+}
+
 const existing = await api('GET', `/lines?search=${encodeURIComponent(LAB_USER)}`);
 if (existing.items.some((l) => l.username === LAB_USER)) {
-  console.log('Datos de ejemplo ya creados; no hago nada.');
+  await ensurePushStream();
+  console.log('Datos de ejemplo ya creados.');
   process.exit(0);
 }
 
@@ -84,4 +106,5 @@ await api('PUT', `/bouquets/${bouquet.id}/items`, {
 const line = await api('POST', '/lines', { username: LAB_USER, password: LAB_PASS, max_connections: 2, notes: 'Línea del laboratorio' });
 await api('PUT', `/lines/${line.id}/bouquets`, { ids: [bouquet.id] });
 
-console.log('Datos de ejemplo creados: 4 canales, 2 películas, 1 serie y la línea de prueba.');
+await ensurePushStream();
+console.log('Datos de ejemplo creados: 5 canales, 2 películas, 1 serie y la línea de prueba.');

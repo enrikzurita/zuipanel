@@ -9,6 +9,7 @@ import {
   type AgentConfigResponse,
   type AgentHeartbeat,
   type ContentType,
+  type MediaFileReport,
   type StreamTokenPayload,
 } from '@zuipanel/shared';
 import type { AgentConfig } from './config.js';
@@ -17,6 +18,9 @@ import { parsePlaylist, rewritePlaylist } from './hls.js';
 import { Supervisor, type StreamProcess } from './supervisor.js';
 import { SystemMetrics } from './metrics.js';
 import { sendFileWithRange } from './vod.js';
+import { IngestWatcher } from './ingest.js';
+import { Recorder } from './recorder.js';
+import { registerUploadRoutes } from './upload.js';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const HEARTBEAT_EVERY_MS = 10_000;
@@ -62,9 +66,41 @@ export async function buildAgent(config: AgentConfig, opts: { logger?: boolean }
     return res.json();
   };
 
+  /** Reintenta una llamada al panel (p. ej. registrar una grabación si el panel se reinicia). */
+  async function panelPostWithRetry(path: string, body: unknown, tries = 5) {
+    for (let i = 1; ; i++) {
+      try {
+        return await panelFetch(path, { method: 'POST', body: JSON.stringify(body) });
+      } catch (e) {
+        if (i >= tries) throw e;
+        await sleep(2000 * i);
+      }
+    }
+  }
+
+  const recorder = new Recorder({
+    dir: config.recordDir ?? '/media/grabaciones',
+    ffmpegPath: config.ffmpegPath,
+    minSeconds: config.minRecordSec ?? 30,
+    log,
+    onFinished: async (streamId: number, report: MediaFileReport) => {
+      await panelPostWithRetry('/internal/agent/recordings', { streamId, ...report });
+    },
+  });
+  const ingest = new IngestWatcher(supervisor, recorder, {
+    statUrl: config.ingestStatUrl ?? 'http://127.0.0.1:8088/stat',
+    rtmpBase: config.ingestRtmp ?? 'rtmp://127.0.0.1:1935/live',
+    log,
+  });
+
   async function sync() {
     const cfg = (await panelFetch('/internal/agent/config')) as AgentConfigResponse;
-    await supervisor.reconcile(cfg.streams);
+    // Los canales push leen de la entrada RTMP local con su clave
+    const streams = cfg.streams.map((s) =>
+      s.input === 'push' && s.streamKey ? { ...s, sources: [ingest.sourceFor(s.streamKey)], onDemand: false } : s,
+    );
+    await supervisor.reconcile(streams);
+    await ingest.tick();
   }
 
   const metrics = new SystemMetrics();
@@ -143,6 +179,38 @@ export async function buildAgent(config: AgentConfig, opts: { logger?: boolean }
   };
 
   app.get('/health', async () => ({ ok: true, serverId: config.serverId, streams: supervisor.streams.size }));
+
+  // ---- Entrada RTMP: nginx-rtmp pregunta aquí si una clave puede publicar ----
+  app.register(async (r) => {
+    r.addContentTypeParser('application/x-www-form-urlencoded', { parseAs: 'string' }, (_req, body, done) =>
+      done(null, Object.fromEntries(new URLSearchParams(String(body)))),
+    );
+    r.post('/ingest/publish', async (req, reply) => {
+      // Solo el servidor de entrada (red interna) puede llamar aquí
+      const remote = req.socket.remoteAddress ?? '';
+      if (!/^(::ffff:)?(127\.|10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.)|^::1$/.test(remote)) {
+        return reply.code(403).send('forbidden');
+      }
+      const b = (req.body ?? {}) as Record<string, string>;
+      const key = b.name ?? '';
+      if (b.app !== 'live' || !ingest.isValidKey(key)) {
+        log(`publicación rechazada (clave desconocida) desde ${b.addr ?? '?'}`);
+        return reply.code(403).send('invalid key');
+      }
+      log(`publicación aceptada para la clave …${key.slice(-4)} desde ${b.addr ?? '?'}`);
+      // Arranca el canal sin esperar al siguiente sondeo
+      setTimeout(() => void ingest.tick(), 1500);
+      return reply.code(200).send('ok');
+    });
+  });
+
+  // ---- Subidas de vídeo desde el panel ----
+  registerUploadRoutes(app, {
+    secret: config.streamSecret,
+    dir: config.uploadDir ?? '/media/subidas',
+    log,
+    complete: (uploadId, report) => panelPostWithRetry(`/internal/agent/uploads/${encodeURIComponent(uploadId)}/complete`, report, 3),
+  });
 
   // ---- Directo ----
   app.get('/live/:token/:file', async (req, reply) => {
@@ -285,6 +353,7 @@ export async function buildAgent(config: AgentConfig, opts: { logger?: boolean }
       await safe(sync, 'sync')();
       await safe(heartbeat, 'heartbeat')();
       supervisor.startTimers();
+      ingest.start();
       syncTimer = setInterval(safe(sync, 'sync'), config.syncIntervalSec * 1000);
       hbTimer = setInterval(safe(heartbeat, 'heartbeat'), 15_000);
       await app.listen({ port: config.port, host: config.host });
@@ -292,6 +361,8 @@ export async function buildAgent(config: AgentConfig, opts: { logger?: boolean }
     async stop() {
       if (syncTimer) clearInterval(syncTimer);
       if (hbTimer) clearInterval(hbTimer);
+      ingest.stop();
+      await recorder.stopAll();
       await supervisor.shutdown();
       await app.close();
       redis.disconnect();

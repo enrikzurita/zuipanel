@@ -22,6 +22,10 @@ export interface FieldDef {
   /** Conversión opcional valor guardado → valor del formulario y viceversa */
   encode?: (v: unknown) => unknown;
   decode?: (v: unknown) => unknown;
+  /** Solo se muestra si devuelve true (según el resto del formulario) */
+  show?: (form: Record<string, unknown>) => boolean;
+  /** Validación propia: devuelve el mensaje de error o null */
+  validate?: (value: unknown, form: Record<string, unknown>) => string | null;
 }
 
 export interface Column<T> {
@@ -114,7 +118,10 @@ function fromForm(fields: FieldDef[], form: Record<string, unknown>) {
         out[d.name] = v ?? '';
     }
     if (d.decode) out[d.name] = d.decode(out[d.name]);
-    if (d.required && (out[d.name] === '' || out[d.name] == null)) throw new Error(`Falta "${d.label}"`);
+    const visible = !d.show || d.show(form);
+    if (visible && d.required && (out[d.name] === '' || out[d.name] == null)) throw new Error(`Falta "${d.label}"`);
+    const msg = visible ? d.validate?.(out[d.name], form) : null;
+    if (msg) throw new Error(msg);
   }
   return out;
 }
@@ -319,15 +326,16 @@ function EditDrawer<T extends { id: number }>(
 
   // Agrupa los campos marcados como "half" de dos en dos
   const rows = useMemo(() => {
+    const visible = fields.filter((f) => !f.show || f.show(form));
     const out: FieldDef[][] = [];
-    for (let i = 0; i < fields.length; i++) {
-      if (fields[i].half && fields[i + 1]) {
-        out.push([fields[i], fields[i + 1]]);
+    for (let i = 0; i < visible.length; i++) {
+      if (visible[i].half && visible[i + 1]) {
+        out.push([visible[i], visible[i + 1]]);
         i++;
-      } else out.push([fields[i]]);
+      } else out.push([visible[i]]);
     }
     return out;
-  }, [fields]);
+  }, [fields, form]);
 
   return (
     <Drawer

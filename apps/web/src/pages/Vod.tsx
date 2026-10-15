@@ -1,15 +1,22 @@
 import { useState } from 'react';
 import { api, listAll, type Episode, type Movie, type Series } from '../api';
+import { UploadCloud } from 'lucide-react';
 import { CrudPage, type FieldDef } from '../components/CrudPage';
-import { useData, useToast } from '../components/ui';
+import { Uploader } from '../components/Uploader';
+import { Drawer, Field, fmtDuration, useData, useToast } from '../components/ui';
 import { categoryName, categoryOptions, useRefs } from '../refs';
 
 const EXT_OPTIONS = ['mp4', 'mkv', 'avi', 'ts', 'mov', 'webm'].map((e) => ({ value: e, label: e }));
 const INFO_HELP = 'Opcional. Ejemplo: {"plot":"Sinopsis","genre":"Acción","cast":"…","director":"…","duration_secs":5400}';
 
+const ORIGIN_LABEL = { manual: 'Añadida a mano', recording: 'Grabación', upload: 'Subida' } as const;
+
 export function Movies() {
   const refs = useRefs();
   const [cat, setCat] = useState('');
+  const [origin, setOrigin] = useState('');
+  const [uploading, setUploading] = useState(false);
+  const [version, setVersion] = useState(0);
   const fields: FieldDef[] = [
     { name: 'name', label: 'Título', type: 'text', required: true },
     { name: 'category_id', label: 'Categoría', type: 'select', options: categoryOptions(refs, 'movie'), half: true },
@@ -21,25 +28,87 @@ export function Movies() {
     { name: 'enabled', label: 'Visible para los clientes', type: 'bool' },
   ];
   return (
+    <>
     <CrudPage<Movie>
       resource="movies"
       title="Películas"
       intro="Cada película apunta a un fichero que debe existir en los nodos donde la asignes (por ejemplo, tu montaje rclone)."
       singular="película"
       newLabel="Nueva película"
-      query={cat ? `category_id=${cat}` : ''}
-      toolbarExtra={<CategoryFilter type="movie" value={cat} onChange={setCat} />}
+      key={version}
+      query={[cat && `category_id=${cat}`, origin && `origin=${origin}`].filter(Boolean).join('&')}
+      toolbarExtra={
+        <>
+          <CategoryFilter type="movie" value={cat} onChange={setCat} />
+          <select className="select" value={origin} onChange={(e) => setOrigin(e.target.value)} aria-label="Filtrar por origen">
+            <option value="">Todos los orígenes</option>
+            <option value="recording">Grabaciones de directos</option>
+            <option value="upload">Subidas</option>
+            <option value="manual">Añadidas a mano</option>
+          </select>
+          <button className="btn" onClick={() => setUploading(true)}>
+            <UploadCloud size={16} /> Subir vídeo
+          </button>
+        </>
+      }
       columns={[
         { label: 'Título', render: (m) => <b>{m.name}</b> },
         { label: 'Categoría', render: (m) => categoryName(refs, m.category_id) },
-        { label: 'Nota', className: 'num', render: (m) => Number(m.rating).toFixed(1) },
-        { label: 'Fichero', render: (m) => <span className="mono muted">{m.source_path}</span> },
+        { label: 'Origen', render: (m) => ORIGIN_LABEL[m.origin] ?? m.origin },
+        {
+          label: 'Duración',
+          className: 'num',
+          render: (m) => {
+            const d = Number((m.info as { duration_secs?: number } | null)?.duration_secs ?? 0);
+            return d ? fmtDuration(d) : <span className="muted">—</span>;
+          },
+        },
         { label: 'Visible', render: (m) => (m.enabled ? 'Sí' : <span className="muted">No</span>) },
       ]}
       fields={fields}
       defaults={() => ({ name: '', container_extension: 'mp4', enabled: 1, rating: 0, category_id: null })}
       relations={[serverRelation(refs, 'movies')]}
     />
+    {uploading && <MovieUploadDrawer onClose={() => setUploading(false)} onDone={() => (setUploading(false), setVersion((v) => v + 1))} />}
+    </>
+  );
+}
+
+function MovieUploadDrawer({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+  const refs = useRefs();
+  const [name, setName] = useState('');
+  const [category, setCategory] = useState<string>('');
+  const [plot, setPlot] = useState('');
+  return (
+    <Drawer title="Subir vídeo" onClose={onClose}>
+      <p className="muted" style={{ margin: 0 }}>
+        El vídeo se guarda en el servidor elegido y queda publicado como película, con su duración.
+      </p>
+      <Field label="Título" htmlFor="up-name">
+        <input id="up-name" className="input" value={name} placeholder="Ciudad de Málaga - Rival (jornada 5)" onChange={(e) => setName(e.target.value)} />
+      </Field>
+      <Field label="Categoría" htmlFor="up-cat">
+        <select id="up-cat" className="select" value={category} onChange={(e) => setCategory(e.target.value)}>
+          {categoryOptions(refs, 'movie').map((o) => (
+            <option key={String(o.value)} value={o.value ?? ''}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      </Field>
+      <Field label="Descripción" htmlFor="up-plot">
+        <textarea id="up-plot" className="textarea" style={{ fontFamily: 'inherit' }} value={plot} onChange={(e) => setPlot(e.target.value)} />
+      </Field>
+      <Uploader
+        kind="movie"
+        meta={() =>
+          name.trim()
+            ? { name: name.trim(), category_id: category ? Number(category) : null, info: plot.trim() ? { plot: plot.trim() } : undefined }
+            : 'Escribe un título'
+        }
+        onDone={onDone}
+      />
+    </Drawer>
   );
 }
 
@@ -114,7 +183,7 @@ function EpisodeManager({ series }: { series: Series }) {
   const cur = num ?? next;
 
   const add = async () => {
-    if (!form.source_path.trim()) return toast('Indica el fichero del episodio', true);
+    if (!form.source_path.trim()) return toast('Indica la ruta del fichero, o usa "Subir episodio"', true);
     try {
       await api('POST', '/episodes', { series_id: series.id, ...cur, ...form });
       toast(`T${cur.season} E${cur.episode_num} añadido`);
@@ -175,7 +244,7 @@ function EpisodeManager({ series }: { series: Series }) {
         <input className="input" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
       </div>
       <div className="field">
-        <label>Fichero en el nodo</label>
+        <label>Ruta del fichero en el servidor (si ya está allí)</label>
         <input
           className="input"
           value={form.source_path}
@@ -189,9 +258,21 @@ function EpisodeManager({ series }: { series: Series }) {
       </div>
       <div>
         <button className="btn" onClick={add}>
-          Añadir episodio
+          Añadir con esta ruta
         </button>
       </div>
+      <span className="help">O sube el vídeo del episodio directamente, con la temporada, el número y el título de arriba:</span>
+      <Uploader
+        kind="episode"
+        series_id={series.id}
+        buttonLabel="Subir episodio"
+        meta={() => ({ season: cur.season, episode_num: cur.episode_num, name: form.title })}
+        onDone={() => {
+          setForm({ ...form, title: '' });
+          setNum(null);
+          reload();
+        }}
+      />
     </div>
   );
 }

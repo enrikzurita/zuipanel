@@ -7,7 +7,7 @@ import { after, before, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import mysql from 'mysql2/promise';
 import type { FastifyInstance } from 'fastify';
-import { verifyToken } from '@zuipanel/shared';
+import { verifyPayload, verifyToken } from '@zuipanel/shared';
 import { buildApp } from '../src/app.js';
 import { loadConfig } from '../src/config.js';
 import { migrate } from '../src/migrate.js';
@@ -307,6 +307,115 @@ describe('Panel ZuiPanel (API Xtream)', { skip: !DB_URL && 'TEST_DATABASE_URL no
     });
   });
 
+  describe('Emisión propia, grabaciones y subidas', () => {
+    const auth = { authorization: `Bearer ${ADMIN}` };
+    const agent = { 'x-agent-key': AGENT_KEY, 'x-server-id': '1' };
+    let pushId = 0;
+    let key = '';
+
+    it('un canal de emisión propia recibe clave automáticamente y se puede regenerar', async () => {
+      const r = await app.inject({
+        method: 'POST', url: '/admin/api/streams', headers: auth,
+        payload: { name: 'Partido Cadete', input_type: 'push', sources: [], record: 1, record_category_id: 3, on_demand: 0 },
+      });
+      assert.equal(r.statusCode, 201, r.body);
+      const s = r.json();
+      pushId = s.id;
+      assert.match(s.stream_key, /^[0-9a-f]{24}$/);
+      const regen = await app.inject({ method: 'POST', url: `/admin/api/streams/${pushId}/regenerate-key`, headers: auth });
+      key = regen.json().stream_key;
+      assert.notEqual(key, s.stream_key);
+      const pull = await app.inject({ method: 'POST', url: '/admin/api/streams/101/regenerate-key', headers: auth });
+      assert.equal(pull.statusCode, 404);
+      await app.inject({ method: 'PUT', url: `/admin/api/streams/${pushId}/servers`, headers: auth, payload: { ids: [1] } });
+    });
+
+    it('el nodo recibe el canal como push con su clave', async () => {
+      const cfg = (await get('/internal/agent/config', agent)).json();
+      const s = cfg.streams.find((x: { id: number }) => x.id === pushId);
+      assert.equal(s.input, 'push');
+      assert.equal(s.streamKey, key);
+      assert.equal(s.record, true);
+    });
+
+    it('una grabación terminada se publica como película en su categoría y nodo', async () => {
+      const r = await app.inject({
+        method: 'POST', url: '/internal/agent/recordings', headers: agent,
+        payload: { streamId: pushId, path: '/media/grabaciones/x/20261018-100000.mp4', ext: 'mp4', sizeBytes: 123, durationSec: 5400, startedAt: Date.parse('2026-10-18T08:00:00Z') },
+      });
+      assert.equal(r.statusCode, 201, r.body);
+      const movieId = r.json().movieId;
+      const m = (await get(`/admin/api/movies/${movieId}`, auth)).json();
+      assert.equal(m.origin, 'recording');
+      assert.equal(m.category_id, 3);
+      assert.match(m.name, /^Partido Cadete \(18 oct 2026/);
+      assert.equal(m.info.duration_secs, 5400);
+      assert.deepEqual((await get(`/admin/api/movies/${movieId}/servers`, auth)).json(), [1]);
+      const recs = (await get('/admin/api/movies?origin=recording', auth)).json();
+      assert.equal(recs.total, 1);
+      // el canal no está en ningún paquete todavía: la grabación tampoco
+      const before = (await get('/player_api.php?username=pepe&password=secreto&action=get_vod_streams')).json();
+      assert.ok(!before.some((x: { stream_id: number }) => x.stream_id === movieId));
+      // con el canal en el paquete, la siguiente grabación entra sola
+      const items = (await get('/admin/api/bouquets/1/items', auth)).json();
+      await app.inject({ method: 'PUT', url: '/admin/api/bouquets/1/items', headers: auth, payload: { items: [...items, { type: 'live', id: pushId }] } });
+      const r2 = await app.inject({
+        method: 'POST', url: '/internal/agent/recordings', headers: agent,
+        payload: { streamId: pushId, path: '/media/grabaciones/x/2.mp4', ext: 'mp4', sizeBytes: 1, durationSec: 60, startedAt: Date.now() },
+      });
+      const vods = (await get('/player_api.php?username=pepe&password=secreto&action=get_vod_streams')).json();
+      assert.ok(vods.some((x: { stream_id: number }) => x.stream_id === r2.json().movieId));
+    });
+
+    it('una subida pide permiso al panel, va al nodo y crea la película o el episodio', async () => {
+      const bad = await app.inject({ method: 'POST', url: '/admin/api/uploads', headers: auth, payload: { kind: 'movie', name: 'x', filename: 'a.exe', serverId: 1 } });
+      assert.equal(bad.statusCode, 400);
+      const g = await app.inject({
+        method: 'POST', url: '/admin/api/uploads', headers: auth,
+        payload: { kind: 'movie', name: 'Final de copa', category_id: 3, filename: 'final.MKV', serverId: 1 },
+      });
+      assert.equal(g.statusCode, 200, g.body);
+      const { uploadId, url } = g.json();
+      assert.match(url, /^http:\/\/s1\.example\.com:8081\/upload\/[^/]+$/);
+      const grant = verifyPayload<{ u: string; x: string }>(url.split('/upload/')[1], SECRET);
+      assert.deepEqual([grant?.u, grant?.x], [uploadId, 'mkv']);
+
+      const wrongNode = await app.inject({
+        method: 'POST', url: `/internal/agent/uploads/${uploadId}/complete`, headers: { ...agent, 'x-server-id': '2' },
+        payload: { path: '/m/x.mkv', ext: 'mkv', sizeBytes: 1, durationSec: 60 },
+      });
+      assert.equal(wrongNode.statusCode, 403);
+      const done = await app.inject({
+        method: 'POST', url: `/internal/agent/uploads/${uploadId}/complete`, headers: agent,
+        payload: { path: '/media/subidas/abc.mkv', ext: 'mkv', sizeBytes: 1, durationSec: 60 },
+      });
+      assert.equal(done.statusCode, 201, done.body);
+      const m = (await get(`/admin/api/movies/${done.json().id}`, auth)).json();
+      assert.equal(m.name, 'Final de copa');
+      const vods = (await get('/player_api.php?username=pepe&password=secreto&action=get_vod_streams')).json();
+      assert.ok(vods.some((x: { stream_id: number }) => x.stream_id === done.json().id), 'la subida entra en el paquete de su categoría');
+      assert.equal(m.origin, 'upload');
+      assert.equal(m.container_extension, 'mkv');
+      const again = await app.inject({
+        method: 'POST', url: `/internal/agent/uploads/${uploadId}/complete`, headers: agent,
+        payload: { path: '/m/x.mkv', ext: 'mkv', sizeBytes: 1, durationSec: 60 },
+      });
+      assert.equal(again.statusCode, 404);
+
+      const ge = await app.inject({
+        method: 'POST', url: '/admin/api/uploads', headers: auth,
+        payload: { kind: 'episode', series_id: 301, season: 3, episode_num: 7, name: 'Jornada 7', filename: 'j7.mp4', serverId: 1 },
+      });
+      const de = await app.inject({
+        method: 'POST', url: `/internal/agent/uploads/${ge.json().uploadId}/complete`, headers: agent,
+        payload: { path: '/media/subidas/j7.mp4', ext: 'mp4', sizeBytes: 1, durationSec: 90 },
+      });
+      assert.equal(de.json().type, 'episode');
+      const info = (await get('/player_api.php?username=pepe&password=secreto&action=get_series_info&series_id=301')).json();
+      assert.equal(info.episodes['3'][0].title, 'Jornada 7');
+    });
+  });
+
   describe('API interna de agentes', () => {
     const agent = { 'x-agent-key': AGENT_KEY, 'x-server-id': '1' };
 
@@ -328,7 +437,7 @@ describe('Panel ZuiPanel (API Xtream)', { skip: !DB_URL && 'TEST_DATABASE_URL no
         payload: { transcode_profile_id: r.json().id, on_demand: false },
       });
       const cfg = (await get('/internal/agent/config', agent)).json();
-      assert.deepEqual(cfg.streams.map((s: { id: number }) => s.id), [101, 102, 103]);
+      assert.deepEqual(cfg.streams.map((s: { id: number }) => s.id).slice(0, 3), [101, 102, 103]);
       const s102 = cfg.streams.find((s: { id: number }) => s.id === 102);
       assert.equal(s102.onDemand, false);
       assert.equal(s102.transcode.videoCodec, 'h264_nvenc');

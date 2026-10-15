@@ -107,6 +107,9 @@ export interface StreamStatus {
   lastError: string | null;
   video?: string;
   audio?: string;
+  input?: 'pull' | 'push';
+  signal?: boolean;
+  recording?: boolean;
 }
 export interface TranscodeProfile { id: number; name: string; options: Record<string, unknown> }
 export interface Stream {
@@ -121,6 +124,10 @@ export interface Stream {
   user_agent: string | null;
   enabled: number;
   sort: number;
+  input_type: 'pull' | 'push';
+  stream_key: string | null;
+  record: number;
+  record_category_id: number | null;
 }
 export interface Movie {
   id: number;
@@ -132,6 +139,7 @@ export interface Movie {
   rating: string;
   info: Record<string, unknown> | null;
   enabled: number;
+  origin: 'manual' | 'recording' | 'upload';
 }
 export interface Series {
   id: number;

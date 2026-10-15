@@ -41,6 +41,19 @@ Panel IPTV propio, alternativa a XUI.one, **compatible con la API Xtream Codes**
 | Revendedores, créditos | ⏳ fase 4 |
 | Migración desde la base de datos de XUI | ⏳ fase 5 |
 
+## Emitir tus partidos
+
+**En directo desde la cámara u OBS.** Crea un canal con entrada "Emisión propia" y asígnalo a un servidor. En su ficha verás la dirección RTMP y la clave:
+
+- OBS: Ajustes, Emisión, Servicio "Personalizado", y pega Servidor (`rtmp://SERVIDOR:1935/live`) y Clave.
+- Apps de cámara que piden una sola dirección: usa la URL completa (`rtmp://SERVIDOR:1935/live/CLAVE`).
+
+El canal se enciende solo al empezar a emitir y se apaga al parar. Con "Grabar cada emisión", al terminar aparece en Películas, en la categoría elegida y en los mismos paquetes que el canal. Las grabaciones de menos de 30 s se descartan.
+
+**Vídeos ya grabados.** En Películas, "Subir vídeo"; en una serie, "Subir episodio". El fichero va directamente al servidor elegido, con barra de progreso, y queda publicado con su duración.
+
+Cómo funciona: cada nodo tiene un contenedor `ingest` (nginx con el módulo RTMP). Al publicar, nginx pregunta al agente si la clave es válida. El agente detecta la señal, arranca el canal y graba copiando el vídeo sin recodificar (MP4 fragmentado mientras graba, MP4 normal al terminar).
+
 ## Estructura
 
 ```

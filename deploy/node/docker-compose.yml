@@ -18,6 +18,10 @@ services:
       REDIS_URL: ${REDIS_URL}
       X_ACCEL_PREFIX: /_vod
       IDLE_TIMEOUT: ${IDLE_TIMEOUT:-60}
+      INGEST_RTMP: rtmp://ingest:1935/live
+      INGEST_STAT_URL: http://ingest:8088/stat
+      RECORD_DIR: ${MEDIA_DIR:-/mnt/media}/grabaciones
+      UPLOAD_DIR: ${MEDIA_DIR:-/mnt/media}/subidas
     volumes:
       # Segmentos HLS en RAM: más rápido y no gasta el disco
       - type: tmpfs
@@ -25,7 +29,8 @@ services:
         tmpfs:
           size: 2147483648
       # Ficheros de películas/series (tu montaje rclone, por ejemplo)
-      - ${MEDIA_DIR:-/mnt/media}:${MEDIA_DIR:-/mnt/media}:ro
+      # Lectura y escritura: aquí se guardan grabaciones y subidas
+      - ${MEDIA_DIR:-/mnt/media}:${MEDIA_DIR:-/mnt/media}
     # Descomenta para transcodificar con GPU NVIDIA (requiere nvidia-container-toolkit)
     # environment:
     #   NVIDIA_DRIVER_CAPABILITIES: compute,video,utility
@@ -36,6 +41,18 @@ services:
     #         - driver: nvidia
     #           count: all
     #           capabilities: [gpu, video]
+
+  # Entrada RTMP: las cámaras u OBS publican en rtmp://NODO:1935/live
+  ingest:
+    build:
+      context: ../..
+      target: ingest
+    restart: unless-stopped
+    depends_on: [agent]
+    environment:
+      AGENT_URL: http://agent:8081
+    ports:
+      - "${RTMP_PORT:-1935}:1935"
 
   nginx:
     image: nginx:1.27-alpine

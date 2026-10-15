@@ -64,3 +64,25 @@ export function verifyToken(
   if (opts.checkIp && opts.ip && payload.ip !== opts.ip) return { ok: false, reason: 'ip_mismatch' };
   return { ok: true, payload };
 }
+
+/** Firma un objeto cualquiera (p. ej. un permiso de subida). */
+export function signPayload(payload: object, secret: string): string {
+  const body = b64url(Buffer.from(JSON.stringify(payload)));
+  return `${body}.${b64url(createHmac('sha256', secret).update(body).digest())}`;
+}
+
+/** Verifica y devuelve el objeto firmado, o null. Si lleva campo "e", comprueba caducidad. */
+export function verifyPayload<T extends object>(token: string, secret: string): T | null {
+  const [body, sig] = token.split('.');
+  if (!body || !sig) return null;
+  const expected = createHmac('sha256', secret).update(body).digest();
+  const given = Buffer.from(sig, 'base64url');
+  if (given.length !== expected.length || !timingSafeEqual(given, expected)) return null;
+  try {
+    const p = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) as T & { e?: number };
+    if (typeof p.e === 'number' && p.e < Math.floor(Date.now() / 1000)) return null;
+    return p;
+  } catch {
+    return null;
+  }
+}

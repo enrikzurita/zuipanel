@@ -23,6 +23,16 @@ export interface AgentConfig {
    * X-Accel-Redirect en vez de Node. Mucho más eficiente en producción.
    */
   xAccelPrefix: string;
+  /** Base RTMP donde publican las cámaras/OBS (servidor de entrada nginx-rtmp) */
+  ingestRtmp?: string;
+  /** Página de estadísticas de nginx-rtmp para saber quién está emitiendo */
+  ingestStatUrl?: string;
+  /** Carpeta donde se guardan las grabaciones */
+  recordDir?: string;
+  /** Carpeta donde se guardan los vídeos subidos desde el panel */
+  uploadDir?: string;
+  /** Duración mínima para conservar una grabación (s) */
+  minRecordSec?: number;
 }
 
 export function loadAgentConfig(env = process.env): AgentConfig {
@@ -41,5 +51,10 @@ export function loadAgentConfig(env = process.env): AgentConfig {
     syncIntervalSec: Number(env.SYNC_INTERVAL ?? 30),
     lockTokenToIp: (env.LOCK_TOKEN_TO_IP ?? 'true') === 'true',
     xAccelPrefix: env.X_ACCEL_PREFIX ?? '',
+    ingestRtmp: env.INGEST_RTMP ?? 'rtmp://127.0.0.1:1935/live',
+    ingestStatUrl: env.INGEST_STAT_URL ?? 'http://127.0.0.1:8088/stat',
+    recordDir: env.RECORD_DIR ?? '/media/grabaciones',
+    uploadDir: env.UPLOAD_DIR ?? '/media/subidas',
+    minRecordSec: Number(env.MIN_RECORD_SEC ?? 30),
   };
 }

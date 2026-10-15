@@ -43,3 +43,11 @@ RUN mkdir -p /var/lib/zuipanel/hls && chown -R node:node /var/lib/zuipanel
 EXPOSE 8081
 USER node
 CMD ["node", "apps/agent/dist/server.js"]
+
+# Servidor de entrada RTMP (las cámaras/OBS publican aquí)
+FROM debian:bookworm-slim AS ingest
+RUN apt-get update && apt-get install -y --no-install-recommends nginx libnginx-mod-rtmp && rm -rf /var/lib/apt/lists/*
+COPY deploy/ingest/nginx.conf.tpl /etc/zuipanel/nginx.conf.tpl
+ENV AGENT_URL=http://agent:8081
+EXPOSE 1935
+CMD ["sh", "-c", "sed -e \"s#__AGENT_URL__#${AGENT_URL}#g\" -e 's#__LOAD_MODULE__#include /etc/nginx/modules-enabled/*.conf;#g' /etc/zuipanel/nginx.conf.tpl > /etc/nginx/nginx.conf && exec nginx -g 'daemon off;'"]

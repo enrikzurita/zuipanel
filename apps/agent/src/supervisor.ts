@@ -32,6 +32,10 @@ export class StreamProcess {
   lastError: string | null = null;
   lastAccess = Date.now();
   info: { video?: string; audio?: string } = {};
+  /** Canales push: hay un publicador emitiendo (lo actualiza el IngestWatcher) */
+  signal = false;
+  /** Se está grabando (lo actualiza el Recorder) */
+  recording = false;
 
   constructor(public cfg: AgentStreamConfig, private opts: SupervisorOptions) {
     this.dir = join(opts.hlsDir, String(cfg.id));
@@ -179,6 +183,9 @@ export class StreamProcess {
       restarts: this.restarts,
       lastError: this.lastError,
       ...this.info,
+      input: this.cfg.input ?? 'pull',
+      signal: this.cfg.input === 'push' ? this.signal : undefined,
+      recording: this.recording || undefined,
     };
   }
 }
@@ -206,7 +213,8 @@ export class Supervisor {
       } else {
         await sp.update(cfg);
       }
-      if (!cfg.onDemand && !sp.wanted) await sp.start();
+      // Los canales push los arranca el IngestWatcher cuando llega señal
+      if (!cfg.onDemand && cfg.input !== 'push' && !sp.wanted) await sp.start();
     }
   }
 
@@ -215,6 +223,7 @@ export class Supervisor {
     const sp = this.streams.get(id);
     if (!sp) return null;
     sp.touch();
+    if (sp.cfg.input === 'push' && !sp.signal) return null;
     if (!sp.wanted) await sp.start();
     return (await sp.waitReady()) ? sp : null;
   }
@@ -223,7 +232,7 @@ export class Supervisor {
     this.timer = setInterval(async () => {
       for (const sp of this.streams.values()) {
         await sp.checkStall();
-        if (sp.cfg.onDemand && sp.wanted && Date.now() - sp.lastAccess > this.opts.idleTimeoutSec * 1000) {
+        if (sp.cfg.onDemand && sp.cfg.input !== 'push' && sp.wanted && Date.now() - sp.lastAccess > this.opts.idleTimeoutSec * 1000) {
           this.opts.log?.(`[${sp.cfg.id}] sin espectadores, parando (bajo demanda)`);
           await sp.stop();
         }

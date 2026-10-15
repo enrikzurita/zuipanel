@@ -1,6 +1,8 @@
 import { timingSafeEqual } from 'node:crypto';
 import type { FastifyInstance, FastifyReply } from 'fastify';
-import type { MetricSample } from '@zuipanel/shared';
+import { randomBytes } from 'node:crypto';
+import { signPayload, type MetricSample } from '@zuipanel/shared';
+import type { UploadMeta } from '../internal/agent-routes.js';
 import type { AppContext } from '../context.js';
 import { execute, parseJson, query, queryOne } from '../db.js';
 
@@ -29,13 +31,16 @@ const RESOURCES: Record<string, Resource> = {
   transcode_profiles: { table: 'transcode_profiles', columns: ['name', 'options'], json: ['options'], search: 'name' },
   streams: {
     table: 'streams',
-    columns: ['name', 'category_id', 'sources', 'icon', 'epg_channel_id', 'on_demand', 'transcode_profile_id', 'user_agent', 'custom_sid', 'enabled', 'sort'],
+    columns: [
+      'name', 'category_id', 'sources', 'icon', 'epg_channel_id', 'on_demand', 'transcode_profile_id', 'user_agent',
+      'custom_sid', 'enabled', 'sort', 'input_type', 'stream_key', 'record', 'record_category_id',
+    ],
     json: ['sources'],
     search: 'name',
   },
   movies: {
     table: 'movies',
-    columns: ['name', 'category_id', 'source_path', 'container_extension', 'icon', 'tmdb_id', 'rating', 'info', 'enabled', 'sort'],
+    columns: ['name', 'category_id', 'source_path', 'container_extension', 'icon', 'tmdb_id', 'rating', 'info', 'enabled', 'sort', 'origin'],
     json: ['info'],
     search: 'name',
   },
@@ -111,6 +116,55 @@ export function registerAdminRoutes(app: FastifyInstance, ctx: AppContext) {
         reply.code(err.statusCode ?? 500).send({ error: err.message });
       });
 
+      /** Los canales de emisión propia necesitan una clave; se genera si falta. */
+      const ensureStreamKey = async (id: number) => {
+        await execute(
+          ctx.db,
+          "UPDATE streams SET stream_key = ? WHERE id = ? AND input_type = 'push' AND (stream_key IS NULL OR stream_key = '')",
+          [randomBytes(12).toString('hex'), id],
+        );
+      };
+
+      r.post('/streams/:id/regenerate-key', async (req, reply) => {
+        const id = Number((req.params as { id: string }).id);
+        const key = randomBytes(12).toString('hex');
+        const result = await execute(ctx.db, "UPDATE streams SET stream_key = ? WHERE id = ? AND input_type = 'push'", [key, id]);
+        if (!result.affectedRows) return reply.code(404).send({ error: 'No es un canal de emisión propia' });
+        return { stream_key: key };
+      });
+
+      // ---- Subidas: el panel da permiso y el navegador envía el fichero al nodo ----
+      r.post('/uploads', async (req, reply) => {
+        const b = (req.body ?? {}) as Partial<UploadMeta> & { filename?: string };
+        const ext = (/\.([a-z0-9]{2,5})$/i.exec(b.filename ?? '')?.[1] ?? '').toLowerCase();
+        if (!['mp4', 'mkv', 'mov', 'avi', 'ts', 'webm', 'm4v'].includes(ext)) {
+          return bad(reply, 'Formato no admitido. Usa mp4, mkv, mov, avi, ts o webm.');
+        }
+        if (b.kind !== 'movie' && b.kind !== 'episode') return bad(reply, 'kind debe ser movie o episode');
+        if (b.kind === 'movie' && !b.name?.trim()) return bad(reply, 'Falta el título');
+        if (b.kind === 'episode' && !b.series_id) return bad(reply, 'Falta la serie');
+        const server = await queryOne<{ id: number; public_url: string }>(
+          ctx.db,
+          'SELECT id, public_url FROM servers WHERE id = ? AND enabled = 1',
+          [Number(b.serverId)],
+        );
+        if (!server) return bad(reply, 'Elige un servidor activo');
+        const id = randomBytes(10).toString('hex');
+        const meta: UploadMeta = {
+          serverId: server.id,
+          kind: b.kind,
+          name: b.name?.trim(),
+          category_id: b.category_id ?? null,
+          series_id: b.series_id ? Number(b.series_id) : undefined,
+          season: b.season ? Number(b.season) : undefined,
+          episode_num: b.episode_num ? Number(b.episode_num) : undefined,
+          info: b.info,
+        };
+        await ctx.redis.set(`zp:upload:${id}`, JSON.stringify(meta), 'EX', 24 * 3600);
+        const token = signPayload({ u: id, x: ext, e: Math.floor(Date.now() / 1000) + 24 * 3600 }, ctx.config.streamSecret);
+        return { uploadId: id, url: `${server.public_url.replace(/\/$/, '')}/upload/${token}` };
+      });
+
       // ---- CRUD genérico ----
       r.get('/:resource', async (req, reply) => {
         const res = RESOURCES[(req.params as { resource: string }).resource];
@@ -124,7 +178,7 @@ export function registerAdminRoutes(app: FastifyInstance, ctx: AppContext) {
           where.push(`${res.search} LIKE ?`);
           params.push(`%${q.search}%`);
         }
-        for (const f of ['category_id', 'series_id', 'type']) {
+        for (const f of ['category_id', 'series_id', 'type', 'origin', 'input_type']) {
           if (q[f] && (res.columns.includes(f))) {
             where.push(`${f} = ?`);
             params.push(q[f]);
@@ -159,6 +213,7 @@ export function registerAdminRoutes(app: FastifyInstance, ctx: AppContext) {
           `INSERT INTO ${res.table} (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`,
           vals,
         );
+        if (res.table === 'streams') await ensureStreamKey(result.insertId);
         const row = await queryOne<Record<string, unknown>>(ctx.db, `SELECT * FROM ${res.table} WHERE id = ?`, [result.insertId]);
         return reply.code(201).send(fromDb(res, row!));
       });
@@ -175,6 +230,7 @@ export function registerAdminRoutes(app: FastifyInstance, ctx: AppContext) {
           [...vals, Number(id)],
         );
         if (!result.affectedRows) return reply.code(404).send({ error: 'no encontrado' });
+        if (res.table === 'streams') await ensureStreamKey(Number(id));
         const row = await queryOne<Record<string, unknown>>(ctx.db, `SELECT * FROM ${res.table} WHERE id = ?`, [Number(id)]);
         return fromDb(res, row!);
       });

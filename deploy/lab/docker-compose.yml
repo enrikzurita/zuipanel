@@ -91,11 +91,28 @@ services:
       IDLE_TIMEOUT: 60
       SYNC_INTERVAL: 15
       NET_STATS_PATH: /proc/1/net/dev
+      INGEST_RTMP: rtmp://ingest:1935/live
+      INGEST_STAT_URL: http://ingest:8088/stat
+      RECORD_DIR: /media/grabaciones
+      UPLOAD_DIR: /media/subidas
     volumes:
       - type: tmpfs
         target: /var/lib/zuipanel/hls
         tmpfs: { size: 1073741824 }
-      - media:/media:ro
+      - media:/media
+
+  # Entrada RTMP: OBS o la app de la cámara publican en rtmp://IP:1935/live
+  ingest:
+    <<: *zui-common
+    build:
+      context: ../..
+      target: ingest
+    image: zuipanel-ingest:lab
+    depends_on: [agent]
+    environment:
+      AGENT_URL: http://agent:8081
+    ports:
+      - "${RTMP_PORT:-1935}:1935"
 
   node-nginx:
     <<: *zui-common
